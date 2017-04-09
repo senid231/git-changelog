@@ -34,5 +34,5 @@ To commit: HEAD 2b6c033a15e10065f6ae02169f7852642f788a67
 git-changelog-app (1.0.1) wheezy; urgency=low
   * add script distribution
   * small upgrades
- -- Denis Talakevich <cnpaut@gmail.com>  Sun, 9 Apr 2017 20:35:15 +0300
+ -- Denis <senid231@gmail.com>  Sun, 9 Apr 2017 20:35:15 +0300
 ```
