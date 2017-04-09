@@ -1,21 +1,27 @@
-if __name__ == "__main__":
-    import os
-    import sys
-    from glob import glob
-    from getopt import getopt, GetoptError
-    from tzlocal import get_localzone
-    from datetime import datetime
-    from git import Repo, InvalidGitRepositoryError
-    from Constants import EXIT_CODES, LOG_LEVELS
-    from Logger import Logger
+import os
+import sys
+from glob import glob
+from getopt import getopt, GetoptError
+from tzlocal import get_localzone
+from datetime import datetime
+from git import Repo, InvalidGitRepositoryError
+from git_changelog.Constants import EXIT_CODES, LOG_LEVELS
+from git_changelog.Logger import Logger
 
+DEFAULT_CHANGELOG_REL_PATH = "debian/changelog"
+DEFAULT_PROJECT_VERSION = "1.0"
+DEFAULT_URGENCY = "low"
+DEFAULT_DEBIAN_BRANCH = "wheezy"
+
+
+def if_empty(value, default):
+    return value if value != "" else default
+
+
+def append_to_changelog():
     git_logger = Logger(LOG_LEVELS.DEBUG)
     is_verbose = False
 
-    def if_empty(value, default):
-        return value if value != "" else default
-
-    # change working directory if -C argument specified
     try:
         opts, args = getopt(sys.argv[1:], "C:V")
         for o, a in opts:
@@ -24,7 +30,7 @@ if __name__ == "__main__":
             if o == '-V':
                 is_verbose = True
     except GetoptError, e:
-        git_logger.error("Unknown option '%s'" % e.opt)
+        Logger(LOG_LEVELS.DEBUG).error("Unknown option '%s'" % e.opt)
         sys.exit(EXIT_CODES.UNKNOWN_ARGUMENT)
 
     try:
@@ -64,7 +70,7 @@ if __name__ == "__main__":
         if len(changelog_files) > 0:
             default_changelog_path = changelog_files[0]
         else:
-            default_changelog_path = 'debian/changelog'  # TODO: from defaults
+            default_changelog_path = DEFAULT_CHANGELOG_REL_PATH
 
         if is_verbose:
             # ask path to changelog
@@ -91,7 +97,7 @@ if __name__ == "__main__":
                 default_version = old_version[0:-1] + chr(ord(old_version[-1]) + 1)
         else:
             default_package_name = os.path.basename(project_path)
-            default_version = "1.0"  # TODO: from defaults
+            default_version = DEFAULT_PROJECT_VERSION
 
         # set default to and from commit
         default_to_rev = repo.git.rev_parse(repo.head.commit)
@@ -128,9 +134,9 @@ if __name__ == "__main__":
             git_logger.info("To commit: HEAD %s" % default_to_rev)
             to_rev = default_to_rev
 
-        # set urgency, debian branch, datetime TODO: from defaults
-        urgency = "low"
-        debian_branch = "wheezy"
+        # set urgency, debian branch, datetime
+        urgency = DEFAULT_URGENCY
+        debian_branch = DEFAULT_DEBIAN_BRANCH
         local_tz = get_localzone()
         current_time = datetime.now(tz=local_tz).strftime('%a, %-d %b %Y %H:%M:%S %z')
 
