@@ -8,10 +8,23 @@ changelog-git
 ```
 
 ## Install
+Download [latest artifacts](https://git.in.didww.com/denis.t/git-changelog/builds/artifacts/v1.0.0/download?job=build-job) from gitlab
+
+in the directory where you download it run:
 ```
-wget https://git.in.didww.com/denis.t/git-changelog/builds/artifacts/v1.0.0/download?job=build-job
 unzip artifacts.zip -d git-changelog
-pip install --user git-changelog/dist/git_changelog-1.0.tar.gz
+sudo pip install git-changelog/dist/git_changelog-1.0.tar.gz
+```
+
+## Uninstall
+```
+sudo pip uninstall git_changelog
+```
+
+## Upgrade
+when next version arrived just download it and do
+```
+sudo pip install -U git_changelog-X.Y.tar.gz
 ```
 
 ## Example
