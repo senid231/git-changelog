@@ -9,7 +9,7 @@ changelog-git
 
 ## Install
 ```
-pip install https://github.com/senid231/git-changelog/releases/download/v1.0-pre1/git_changelog-1.0.tar.gz
+pip install https://git.in.didww.com/denis.t/git-changelog/builds/2423/artifacts/file/dist/git_changelog-1.0.tar.gz
 ```
 
 ## Example
