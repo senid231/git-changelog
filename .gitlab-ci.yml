@@ -4,6 +4,6 @@ build-job:
     - tags
   artifacts:
     paths:
-      - dist/
+      - dist/*.tar.gz
   tags:
     - python
