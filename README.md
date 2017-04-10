@@ -9,7 +9,9 @@ changelog-git
 
 ## Install
 ```
-pip install https://git.in.didww.com/denis.t/git-changelog/builds/2423/artifacts/file/dist/git_changelog-1.0.tar.gz
+wget https://git.in.didww.com/denis.t/git-changelog/builds/artifacts/v1.0.0/download?job=build-job
+unzip artifacts.zip -d git-changelog
+pip install --user git-changelog/dist/git_changelog-1.0.tar.gz
 ```
 
 ## Example
