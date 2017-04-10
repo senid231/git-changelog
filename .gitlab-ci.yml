@@ -1,0 +1,7 @@
+build-job:
+  script: "python setup.py sdist"
+  only:
+    - tags
+  artifacts:
+    paths:
+      - dist/
