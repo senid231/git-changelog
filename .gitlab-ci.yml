@@ -6,4 +6,4 @@ build-job:
     paths:
       - dist/
   tags:
-    - tests
+    - python
