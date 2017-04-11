@@ -22,7 +22,8 @@ EXIT_CODES = Constants({
     "PROJECT_NOT_FOUND": 4,
     "GIT_NOT_FOUND": 5,
     "CHANGELOG_PATH_INVALID": 6,
-    "GIT_NO_COMMITS": 7
+    "GIT_NO_COMMITS": 7,
+    "WRONG_ARGUMENTS": 8
 })
 
 LOG_LEVELS = Constants({

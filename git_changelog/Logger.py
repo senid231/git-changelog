@@ -15,9 +15,9 @@ class Logger:
     def write_log(self, log_level, message):
         if log_level >= self.log_level:
             if log_level != LOG_LEVELS.ERROR:
-                print message
+                print message + "\n"
             else:
-                stderr.write(message)
+                stderr.write(message + "\n")
 
     def info(self, message):
         self.write_log(LOG_LEVELS.INFO, message)

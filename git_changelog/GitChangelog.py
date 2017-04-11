@@ -7,169 +7,425 @@ from datetime import datetime
 from git import Repo, InvalidGitRepositoryError
 from git_changelog.Constants import EXIT_CODES, LOG_LEVELS
 from git_changelog.Logger import Logger
-
-DEFAULT_CHANGELOG_REL_PATH = "debian/changelog"
-DEFAULT_PROJECT_VERSION = "1.0"
-DEFAULT_URGENCY = "low"
-DEFAULT_DEBIAN_BRANCH = "wheezy"
+from git_changelog import __version__
 
 
-def if_empty(value, default):
-    return value if value != "" else default
+def newest_tag(tags_references):
+    newest = tags_references[0]
+    for tag_reference in tags_references[1:-1]:
+        if tag_reference.tag.tagged_date > newest.tag.tagged_date:
+            newest = tag_reference
+    return newest
+
+
+def parse_args():
+    options = {
+        "auto_commit": False,
+        "detailed": False,
+        "debug": False,
+        "quiet": False,
+        "skip_prompt": False,
+        "version": "",
+        "package_name": "",
+        "changelog_path": "",
+        "to_commit": "",
+        "from_commit": "",
+        "project_path": "",
+        "urgency": "",
+        "debian_branch": "",
+        "user_name": "",
+        "user_email": "",
+    }
+
+    try:
+        opts, args = getopt(sys.argv[1:], "hvdqADY", [
+            "help", "version", "debug", "auto-commit", "detailed", "yes",
+            "project-path=", "next-version=", "package-name=", "changelog-path",
+            "to-commit=", "from-commit=", "urgency=", "debian-branch=", "user-name=", "user-email="
+        ])
+        for o, a in opts:
+            if o in ("-h", "--help"):
+                Logger(LOG_LEVELS.INFO).info(
+                    "Usage:\n"
+                    "  changelog-git [options]\n"
+                    "\n"
+                    "Options:\n"
+                    "  -h, --help                Show help.\n"
+                    "  -v, --version             Show version.\n"
+                    "  -d, --debug               Debug mode (print debug logs).\n"
+                    "  -q, --quiet               Suppress all output (except errors).\n"
+                    "  -A, --auto-commit         Create new branch and commit changelog.\n"
+                    "  -D, --detailed            Do not skip guessed prompts.\n"
+                    "  -Y, --yes                 Skip all prompts with defaults.\n"
+                    "  --project-path=<path>     Path to project root (default current directory).\n"
+                    "  --next-version=<version>  Set next changelog version (default ask in prompt).\n"
+                    "  --package-name=<name>     Set package name (default ask in prompt).\n"
+                    "  --changelog-path=<path>   Set relative changelog path (default 'debian/changelog').\n"
+                    "  --to-commit=<ref>         Set to commit (default 'HEAD').\n"
+                    "  --from-commit=<ref>       Set from commit (default last tag).\n"
+                    "  --urgency=<name>          Set urgency (default from changelog).\n"
+                    "  --debian-branch=<ref>     Set debian branch (default from changelog).\n"
+                    "  --user-name=<name>        Set user name (default from git config).\n"
+                    "  --user-email=<email>      Set user email (default from git config)."
+                )
+                sys.exit(0)
+            if o in ("-v", "--version"):
+                Logger(LOG_LEVELS.INFO).info("git_changelog: " + __version__)
+                sys.exit(0)
+            if o in ("-d", "--debug"):
+                options["debug"] = True
+            if o in ("-q", "--quiet"):
+                options["quiet"] = True
+            if o in ("-A", "--auto-commit"):
+                options["auto_commit"] = True
+            if o in ("-D", "--detailed"):
+                options["detailed"] = True
+            if o in ("-Y", "--yes"):
+                options["skip_prompt"] = True
+            if o == "--project-path":
+                options["project_path"] = a
+            if o == "--next-version":
+                options["version"] = a
+            if o == "--package-name":
+                options["package_name"] = a
+            if o == "--changelog-path":
+                options["changelog_path"] = a
+            if o == "--to-commit":
+                options["to_commit"] = a
+            if o == "--from-commit":
+                options["from_commit"] = a
+            if o == "--urgency":
+                options["urgency"] = a
+            if o == "--debian-branch":
+                options["debian_branch"] = a
+            if o == "--user-name":
+                options["user_name"] = a
+            if o == "--user-email":
+                options["user_email"] = a
+
+    except GetoptError, e:
+        Logger(LOG_LEVELS.ERROR).error("changelog-git: Unknown option '%s'" % e.opt)
+        sys.exit(EXIT_CODES.UNKNOWN_ARGUMENT)
+
+    if options["debug"] and options["quiet"]:
+        Logger(LOG_LEVELS.ERROR).error("changelog-git: -d/--debug and -q/--quiet can't be set in same time")
+        sys.exit(EXIT_CODES.WRONG_ARGUMENTS)
+
+    if options["skip_prompt"] and options["detailed"]:
+        Logger(LOG_LEVELS.ERROR).error("changelog-git: -D/--detailed and -Y/--yes can't be set in same time")
+        sys.exit(EXIT_CODES.WRONG_ARGUMENTS)
+
+    return options
+
+
+def setup_logger(options):
+    if options["debug"]:
+        return Logger(LOG_LEVELS.DEBUG)
+    elif options["quiet"]:
+        return Logger(LOG_LEVELS.ERROR)
+
+    return Logger(LOG_LEVELS.INFO)
+
+
+def ask_question(prompt, default_answer):
+    answer = raw_input(prompt)
+    return answer if answer else default_answer
+
+
+def set_project_path(options, git_logger):
+    # set default project path
+    default_project_path = os.getcwd()
+
+    if options["project_path"]:
+        project_path = options["project_path"]
+    elif options["detailed"]:
+        # ask project path
+        project_path = os.path.abspath(
+            ask_question("Project path (default %s): " % default_project_path, default_project_path)
+        )
+    else:
+        git_logger.info("Project path: %s" % default_project_path)
+        project_path = default_project_path
+    git_logger.debug("project_path set to '%s'" % project_path)
+
+    # check project path exist
+    if not os.path.exists(project_path) or not os.path.isdir(project_path):
+        git_logger.error("changelog-git: Can't find project directory '%s'" % project_path)
+        sys.exit(EXIT_CODES.PROJECT_NOT_FOUND)
+    os.chdir(project_path)
+    git_logger.debug("chdir to project_path '%s'" % project_path)
+    return project_path
+
+
+def set_repo(project_path, git_logger):
+    # check project has git
+    try:
+        repo = Repo(project_path)
+        git_logger.debug("connecting to git repo")
+    except InvalidGitRepositoryError, e:
+        git_logger.error("changelog-git: Can't find git repo for '%s'" % e.message)
+        sys.exit(EXIT_CODES.GIT_NOT_FOUND)
+
+    # check git has commits
+    try:
+        repo.head.commit
+    except ValueError:
+        git_logger.error("changelog-git: Git has no commits")
+        sys.exit(EXIT_CODES.GIT_NO_COMMITS)
+    return repo
+
+
+def set_changelog_path(options, git_logger):
+    # set default changelog path
+    changelog_files = glob("**/changelog")
+    if len(changelog_files) > 0:
+        default_changelog_path = changelog_files[0]
+    else:
+        default_changelog_path = "debian/changelog"
+
+    if options["changelog_path"]:
+        changelog_path = options["changelog_path"]
+    elif options["detailed"]:
+        # ask path to changelog
+        changelog_path = ask_question(
+            "Related path to changelog (default %s): " % default_changelog_path,
+            default_changelog_path
+        )
+    else:
+        git_logger.info("Related path to changelog: %s" % default_changelog_path)
+        changelog_path = default_changelog_path
+    git_logger.debug("set changelog_path to '%s" % changelog_path)
+
+    # fails if changelog does not exist
+    if os.path.isdir(changelog_path):
+        git_logger.error("changelog-git: changelog '%s' is a directory" % changelog_path)
+        sys.exit(EXIT_CODES.CHANGELOG_PATH_INVALID)
+    changelog_path_dir = os.path.dirname(changelog_path)
+    if not os.path.isdir(changelog_path_dir):
+        git_logger.error("changelog-git: changelog dir '%s' doesn't exists" % changelog_path_dir)
+        sys.exit(EXIT_CODES.CHANGELOG_PATH_INVALID)
+    return changelog_path
+
+
+def set_defaults(changelog_path, project_path, repo, git_logger):
+    defaults = {}
+    # set default package name and version
+    if os.path.exists(changelog_path):
+        git_logger.debug("changelog_path exists")
+        with open(changelog_path, "r") as f:
+            changelog_line = f.readline().split(" ")
+    else:
+        git_logger.debug("changelog_path doesn't exist")
+        changelog_line = []
+
+    if len(changelog_line) > 1:
+        defaults["package_name"] = changelog_line[0]
+        old_version = changelog_line[1].lstrip("(").rstrip(")")
+        if old_version[-1] == "9":
+            defaults["version"] = old_version[0:-1] + "10"
+        else:
+            defaults["version"] = old_version[0:-1] + chr(ord(old_version[-1]) + 1)
+        defaults["debian_branch"] = changelog_line[2].rstrip(";")
+        defaults["urgency"] = changelog_line[3].lstrip("urgency=")
+    else:
+        defaults["package_name"] = os.path.basename(project_path)
+        defaults["version"] = "1.0"
+        defaults["urgency"] = "low"
+        defaults["debian_branch"] = "wheezy"
+
+    # set default version from tag of HEAD commit if it is exist
+    if len(repo.tags) > 0 and repo.git.rev_parse(repo.tags[0].commit) == repo.git.rev_parse(repo.head.commit):
+        defaults["version"] = repo.tags[0]
+
+    return defaults
+
+
+def set_package_name(options, default, git_logger):
+    if options["package_name"]:
+        package_name = options["package_name"]
+    elif options["detailed"]:
+        # ask package name
+        package_name = ask_question("Package name (default %s): " % default, default)
+    else:
+        git_logger.info("Package name: %s" % default)
+        package_name = default
+    git_logger.debug("set package_name to '%s" % package_name)
+    return package_name
+
+
+def set_version(options, default, git_logger):
+    # ask version
+    if options["version"]:
+        version = options["version"]
+    elif options["skip_prompt"]:
+        git_logger.info("Version: %s" % default)
+        version = default
+    else:
+        version = ask_question("Version (default %s): " % default, default)
+    git_logger.debug("set version to '%s" % version)
+    return version
+
+
+def set_from_commit(options, git_logger, repo):
+    if len(repo.tags) > 0:
+        default = newest_tag(repo.tags).tag.tag
+    else:
+        default = "HEAD"
+
+    if options["from_commit"]:
+        from_rev = options["from_commit"]
+    elif options["skip_prompt"]:
+        git_logger.info("From commit: %s" % default)
+        from_rev = default
+    else:
+        # ask from commit
+        from_rev = repo.git.rev_parse(
+            ask_question("From commit (default %s): " % default, default)
+        )
+    git_logger.debug("set from_rev to '%s" % from_rev)
+    return from_rev
+
+
+def set_to_commit(options, git_logger, repo):
+    default = "HEAD"
+    if options["to_commit"]:
+        to_rev = options["to_commit"]
+    elif options["detailed"]:
+        # ask to commit
+        to_rev = repo.git.rev_parse(
+            ask_question("To commit (default %s): " % default, default)
+        )
+    else:
+        git_logger.info("To commit: HEAD %s" % default)
+        to_rev = default
+    git_logger.debug("set to_rev to '%s" % to_rev)
+    return to_rev
 
 
 def append_to_changelog():
-    git_logger = Logger(LOG_LEVELS.DEBUG)
-    is_verbose = False
+    options = parse_args()
+    git_logger = setup_logger(options)
 
-    try:
-        opts, args = getopt(sys.argv[1:], "C:V")
-        for o, a in opts:
-            if o == "-C":
-                os.chdir(a)
-            if o == '-V':
-                is_verbose = True
-    except GetoptError, e:
-        Logger(LOG_LEVELS.DEBUG).error("Unknown option '%s'" % e.opt)
-        sys.exit(EXIT_CODES.UNKNOWN_ARGUMENT)
+    project_path = set_project_path(options, git_logger=git_logger)
+    repo = set_repo(project_path, git_logger)
+    changelog_path = set_changelog_path(options, git_logger=git_logger)
+    defaults = set_defaults(changelog_path=changelog_path, project_path=project_path, git_logger=git_logger, repo=repo)
+    package_name = set_package_name(options=options, default=defaults["package_name"], git_logger=git_logger)
+    version = set_version(options=options, default=defaults["version"], git_logger=git_logger)
+    to_rev = set_to_commit(options=options, git_logger=git_logger, repo=repo)
+    from_rev = set_from_commit(options=options, git_logger=git_logger, repo=repo)
 
-    try:
-        # set default project path
-        default_project_path = os.getcwd()
+    # set urgency
+    if options["urgency"]:
+        urgency = options["urgency"]
+    else:
+        urgency = defaults["urgency"]
+    git_logger.debug("set urgency to '%s" % urgency)
 
-        if is_verbose:
-            # ask project path
-            result = raw_input("Project path (default %s): " % default_project_path)
-            project_path = os.path.abspath(if_empty(result, default_project_path))
-        else:
-            git_logger.info("Project path: %s" % default_project_path)
-            project_path = default_project_path
+    # set debian_branch
+    if options["debian_branch"]:
+        debian_branch = options["debian_branch"]
+    else:
+        debian_branch = defaults["debian_branch"]
+    git_logger.debug("set debian_branch to '%s" % debian_branch)
 
-        # check project path exist
-        if not os.path.exists(project_path) or not os.path.isdir(project_path):
-            git_logger.error("Can't find project directory '%s'" % project_path)
-            sys.exit(EXIT_CODES.PROJECT_NOT_FOUND)
-        os.chdir(project_path)
+    # set current_time
+    local_tz = get_localzone()
+    current_time = datetime.now(tz=local_tz).strftime("%a, %-d %b %Y %H:%M:%S %z")
+    git_logger.debug("set current_time to '%s" % current_time)
 
-        # check project has git
-        try:
-            repo = Repo(project_path)
-        except InvalidGitRepositoryError, e:
-            git_logger.error("Can't find git repo for '%s'" % e.message)
-            sys.exit(EXIT_CODES.GIT_NOT_FOUND)
+    # set name
+    if options["user_name"]:
+        name = options["user_name"]
+    else:
+        name = repo.config_reader().get("user", "name")
+    git_logger.debug("set name to '%s" % name)
 
-        # check git has commits
-        try:
-            repo.head.commit
-        except ValueError:
-            git_logger.error("Git has no commits")
-            sys.exit(EXIT_CODES.GIT_NO_COMMITS)
+    # set email
+    if options["user_email"]:
+        email = options["user_email"]
+    else:
+        email = repo.config_reader().get("user", "email")
+    git_logger.debug("set email to '%s" % email)
 
-        # set default changelog path
-        changelog_files = glob('**/changelog')
-        if len(changelog_files) > 0:
-            default_changelog_path = changelog_files[0]
-        else:
-            default_changelog_path = DEFAULT_CHANGELOG_REL_PATH
+    # generate changelog text
+    changelog_text = generate_changelog(
+        from_rev=from_rev,
+        to_rev=to_rev,
+        repo=repo,
+        package_name=package_name,
+        version=version,
+        debian_branch=debian_branch,
+        urgency=urgency,
+        name=name,
+        email=email,
+        current_time=current_time,
+        git_logger=git_logger
+    )
 
-        if is_verbose:
-            # ask path to changelog
-            result = raw_input("Related path to changelog (default %s): " % default_changelog_path)
-            changelog_path = if_empty(result, default_changelog_path)
-        else:
-            git_logger.info("Related path to changelog: %s" % default_changelog_path)
-            changelog_path = default_changelog_path
+    # append to changelog
+    append_changelog(changelog_path, changelog_text, git_logger=git_logger)
 
-        # create changelog if it does not exist
-        if os.path.isdir(changelog_path):
-            git_logger.error("changelog '%s' is a directory" % changelog_path)
-            sys.exit(EXIT_CODES.CHANGELOG_PATH_INVALID)
+    # commit to new branch
+    if options["auto_commit"]:
+        commit_changelog(
+            changelog_path=changelog_path,
+            version=version,
+            repo=repo,
+            git_logger=git_logger
+        )
 
-        # set default package name and version
-        with open(changelog_path, 'r') as f:
-            changelog_line = f.readline().split(" ")
-        if len(changelog_line) > 1:
-            default_package_name = changelog_line[0]
-            old_version = changelog_line[1][1:-1]
-            if old_version[-1] == '9':
-                default_version = old_version[0:-1] + '10'
-            else:
-                default_version = old_version[0:-1] + chr(ord(old_version[-1]) + 1)
-        else:
-            default_package_name = os.path.basename(project_path)
-            default_version = DEFAULT_PROJECT_VERSION
 
-        # set default to and from commit
-        default_to_rev = repo.git.rev_parse(repo.head.commit)
-        if len(repo.tags) > 1 and repo.git.rev_parse(repo.tags[0].commit) == default_to_rev:
-            default_from_rev = repo.git.rev_parse(repo.tags[1].commit)
-        else:
-            default_from_rev = default_to_rev
+def commit_changelog(changelog_path, version, repo, git_logger):
+    branch_name = "bump-%s" % version.replace("~", "-")
+    git_logger.debug("create branch '%s' from HEAD" % branch_name)
+    branch = repo.create_head(branch_name)
+    git_logger.debug("checkout to branch '%s'" % branch_name)
+    branch.checkout()
+    git_logger.debug("add '%s' to index" % changelog_path)
+    repo.index.add([changelog_path])
+    commit_message = "bump %s\n\n[ci skip] [changelog skip]" % version
+    git_logger.debug("commit with message:\n%s" % commit_message)
+    repo.index.commit(commit_message)
 
-        # set default rev from tag of HEAD commit if it is exist
-        if len(repo.tags) > 0 and repo.git.rev_parse(repo.tags[0].commit) == repo.git.rev_parse(repo.head.commit):
-            default_version = repo.tags[0]
 
-        if is_verbose:
-            # ask package name
-            result = raw_input("Package name (default %s): " % default_package_name)
-            package_name = if_empty(result, default_package_name)
-        else:
-            git_logger.info("Package name: %s" % default_package_name)
-            package_name = default_package_name
+def append_changelog(path, text, git_logger):
+    # append changelog
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path))
+        open(path, "w+").close()
+        git_logger.debug("create changelog '%s'" % path)
+    with open(path, "r+") as f:
+        content = f.read()
+        f.seek(0, 0)
+        f.write(text + content)
+    git_logger.debug("append changes to the top of changelog")
 
-        # ask version
-        result = raw_input("Version (default %s): " % default_version)
-        version = if_empty(result, default_version)
 
-        # ask from commit
-        result = raw_input("From commit (default HEAD %s): " % default_from_rev)
-        from_rev = repo.git.rev_parse(if_empty(result, default_from_rev))
+def generate_changelog(
+        from_rev, to_rev, repo, package_name, version, debian_branch, urgency, name, email, current_time, git_logger
+):
+    changelog_template = "%s (%s) %s; urgency=%s\n  * %s\n -- %s <%s>  %s\n\n"
+    if from_rev == to_rev:
+        commits = [repo.commit(to_rev)]
+    else:
+        commits = list(repo.iter_commits("%s...%s" % (from_rev, to_rev)))
+    commits_to_remove = []
+    for commit in commits:
+        if (
+                            commit.message.startswith("Merge branch") or
+                            commit.message.lstrip().startswith("bump") or
+                            "[changelog skip]" in commit.message.lower() or
+                            "[skip changelog]" in commit.message.lower()
+        ):
+            commits_to_remove.append(commit)
+    for commit_to_remove in commits_to_remove:
+        commits.remove(commit_to_remove)
 
-        if is_verbose:
-            # ask to commit
-            result = raw_input("To commit (default %s): " % default_to_rev)
-            to_rev = repo.git.rev_parse(if_empty(result, default_to_rev))
-        else:
-            git_logger.info("To commit: HEAD %s" % default_to_rev)
-            to_rev = default_to_rev
+    log = "\n  * ".join([commit.message.split("\n")[0] for commit in commits])
 
-        # set urgency, debian branch, datetime
-        urgency = DEFAULT_URGENCY
-        debian_branch = DEFAULT_DEBIAN_BRANCH
-        local_tz = get_localzone()
-        current_time = datetime.now(tz=local_tz).strftime('%a, %-d %b %Y %H:%M:%S %z')
-
-        # set email and name from git config
-        name = repo.config_reader().get('user', 'name')
-        email = repo.config_reader().get('user', 'email')
-
-        # generate changelog text
-        changelog_template = "%s (%s) %s; urgency=%s\n  * %s\n -- %s <%s>  %s\n\n"
-        if from_rev == to_rev:
-            commits = [repo.commit(to_rev)]
-        else:
-            commits = list(repo.iter_commits('%s...%s' % (from_rev, to_rev)))
-        commits_to_remove = []
-        for commit in commits:
-            if commit.message.startswith("Merge branch") or commit.message.lstrip().startswith("bump"):
-                commits_to_remove.append(commit)
-        for commit_to_remove in commits_to_remove:
-            commits.remove(commit_to_remove)
-        log = "\n  * ".join([commit.message.rstrip("\n").split("\n")[0] for commit in commits])
-        changelog_text = changelog_template % (
-            package_name, version, debian_branch, urgency, log, name, email, current_time)
-        git_logger.debug(changelog_text)
-
-        # append changelog
-        if not os.path.exists(changelog_path):
-            os.makedirs(os.path.dirname(changelog_path))
-            open(changelog_path, 'w+').close()
-        with open(changelog_path, 'r+') as f:
-            content = f.read()
-            f.seek(0, 0)
-            f.write(changelog_text + content)
-
-    except KeyboardInterrupt:
-        git_logger.error("\nProgram interrupted by user")
-        sys.exit(EXIT_CODES.CONTROL_C)
+    changelog_text = changelog_template % (
+        package_name, version, debian_branch, urgency, log, name, email, current_time
+    )
+    git_logger.debug(changelog_text)
+    return changelog_text
