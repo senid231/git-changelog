@@ -2,20 +2,11 @@ import os
 import sys
 from glob import glob
 from getopt import getopt, GetoptError
-from tzlocal import get_localzone
-from datetime import datetime
 from git import Repo, InvalidGitRepositoryError
-from git_changelog.Constants import EXIT_CODES, LOG_LEVELS
+from git_changelog.Utils import match_any_pattern, max_by_lambda, ask_question, local_datetime
+from git_changelog.Constants import EXIT_CODES, LOG_LEVELS, SKIP_COMMIT_PATTERNS
 from git_changelog.Logger import Logger
 from git_changelog import __version__
-
-
-def newest_tag(tags_references):
-    newest = tags_references[0]
-    for tag_reference in tags_references[1:-1]:
-        if tag_reference.tag.tagged_date > newest.tag.tagged_date:
-            newest = tag_reference
-    return newest
 
 
 def parse_args():
@@ -127,11 +118,6 @@ def setup_logger(options):
     return Logger(LOG_LEVELS.INFO)
 
 
-def ask_question(prompt, default_answer):
-    answer = raw_input(prompt)
-    return answer if answer else default_answer
-
-
 def set_project_path(options, git_logger):
     # set default project path
     default_project_path = os.getcwd()
@@ -226,7 +212,7 @@ def set_defaults(changelog_path, project_path, repo, git_logger):
         else:
             defaults["version"] = old_version[0:-1] + chr(ord(old_version[-1]) + 1)
         defaults["debian_branch"] = changelog_line[2].rstrip(";")
-        defaults["urgency"] = changelog_line[3].lstrip("urgency=")
+        defaults["urgency"] = changelog_line[3].lstrip("urgency=").rstrip("\n")
     else:
         defaults["package_name"] = os.path.basename(project_path)
         defaults["version"] = "1.0"
@@ -268,7 +254,7 @@ def set_version(options, default, git_logger):
 
 def set_from_commit(options, git_logger, repo):
     if len(repo.tags) > 0:
-        default = newest_tag(repo.tags).tag.tag
+        default = max_by_lambda(repo.tags, (lambda x: x.tag.tagged_date)).tag.tag
     else:
         default = "HEAD"
 
@@ -302,7 +288,59 @@ def set_to_commit(options, git_logger, repo):
     return to_rev
 
 
-def append_to_changelog():
+def commit_changelog(changelog_path, version, repo, git_logger):
+    branch_name = "bump-%s" % version.replace("~", "-")
+    git_logger.debug("create branch '%s' from HEAD" % branch_name)
+    branch = repo.create_head(branch_name)
+    git_logger.debug("checkout to branch '%s'" % branch_name)
+    branch.checkout()
+    git_logger.debug("add '%s' to index" % changelog_path)
+    repo.index.add([changelog_path])
+    commit_message = "bump %s\n\n[ci skip] [changelog skip]" % version
+    git_logger.debug("commit with message:\n%s" % commit_message)
+    repo.index.commit(commit_message)
+
+
+def modify_changelog_file(path, text, git_logger):
+    # append changelog
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path))
+        open(path, "w+").close()
+        git_logger.debug("create changelog '%s'" % path)
+    with open(path, "r+") as f:
+        content = f.read()
+        f.seek(0, 0)
+        f.write(text + content)
+    git_logger.debug("append changes to the top of changelog")
+
+
+def generate_changelog(
+        from_rev, to_rev, repo, package_name, version, debian_branch, urgency, name, email, current_time, git_logger
+):
+    changelog_template = "%s (%s) %s; urgency=%s\n%s\n -- %s <%s>  %s\n\n"
+    log = generate_description(from_rev=from_rev, to_rev=to_rev, repo=repo)
+
+    changelog_text = changelog_template % (
+        package_name, version, debian_branch, urgency, log, name, email, current_time
+    )
+    git_logger.debug(changelog_text)
+    return changelog_text
+
+
+def generate_description(from_rev, to_rev, repo):
+    if from_rev == to_rev:
+        commits = [repo.commit(to_rev)]
+    else:
+        commits = list(repo.iter_commits("%s...%s" % (from_rev, to_rev)))
+    included_commits = []
+    for commit in commits:
+        if not match_any_pattern(commit.message, SKIP_COMMIT_PATTERNS):
+            included_commits.append(commit)
+
+    return "\n".join([("  * %s" % commit.message.split("\n")[0]) for commit in included_commits])
+
+
+def process():
     options = parse_args()
     git_logger = setup_logger(options)
 
@@ -330,8 +368,7 @@ def append_to_changelog():
     git_logger.debug("set debian_branch to '%s" % debian_branch)
 
     # set current_time
-    local_tz = get_localzone()
-    current_time = datetime.now(tz=local_tz).strftime("%a, %-d %b %Y %H:%M:%S %z")
+    current_time = local_datetime().strftime("%a, %-d %b %Y %H:%M:%S %z")
     git_logger.debug("set current_time to '%s" % current_time)
 
     # set name
@@ -364,7 +401,7 @@ def append_to_changelog():
     )
 
     # append to changelog
-    append_changelog(changelog_path, changelog_text, git_logger=git_logger)
+    modify_changelog_file(changelog_path, changelog_text, git_logger=git_logger)
 
     # commit to new branch
     if options["auto_commit"]:
@@ -374,58 +411,3 @@ def append_to_changelog():
             repo=repo,
             git_logger=git_logger
         )
-
-
-def commit_changelog(changelog_path, version, repo, git_logger):
-    branch_name = "bump-%s" % version.replace("~", "-")
-    git_logger.debug("create branch '%s' from HEAD" % branch_name)
-    branch = repo.create_head(branch_name)
-    git_logger.debug("checkout to branch '%s'" % branch_name)
-    branch.checkout()
-    git_logger.debug("add '%s' to index" % changelog_path)
-    repo.index.add([changelog_path])
-    commit_message = "bump %s\n\n[ci skip] [changelog skip]" % version
-    git_logger.debug("commit with message:\n%s" % commit_message)
-    repo.index.commit(commit_message)
-
-
-def append_changelog(path, text, git_logger):
-    # append changelog
-    if not os.path.exists(path):
-        os.makedirs(os.path.dirname(path))
-        open(path, "w+").close()
-        git_logger.debug("create changelog '%s'" % path)
-    with open(path, "r+") as f:
-        content = f.read()
-        f.seek(0, 0)
-        f.write(text + content)
-    git_logger.debug("append changes to the top of changelog")
-
-
-def generate_changelog(
-        from_rev, to_rev, repo, package_name, version, debian_branch, urgency, name, email, current_time, git_logger
-):
-    changelog_template = "%s (%s) %s; urgency=%s\n  * %s\n -- %s <%s>  %s\n\n"
-    if from_rev == to_rev:
-        commits = [repo.commit(to_rev)]
-    else:
-        commits = list(repo.iter_commits("%s...%s" % (from_rev, to_rev)))
-    commits_to_remove = []
-    for commit in commits:
-        if (
-                            commit.message.startswith("Merge branch") or
-                            commit.message.lstrip().startswith("bump") or
-                            "[changelog skip]" in commit.message.lower() or
-                            "[skip changelog]" in commit.message.lower()
-        ):
-            commits_to_remove.append(commit)
-    for commit_to_remove in commits_to_remove:
-        commits.remove(commit_to_remove)
-
-    log = "\n  * ".join([commit.message.split("\n")[0] for commit in commits])
-
-    changelog_text = changelog_template % (
-        package_name, version, debian_branch, urgency, log, name, email, current_time
-    )
-    git_logger.debug(changelog_text)
-    return changelog_text
