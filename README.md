@@ -28,17 +28,17 @@ Options:
 ```
 
 ## Install
-Download [latest artifacts](https://git.in.didww.com/denis.t/git-changelog/builds/artifacts/v1.1.0/download?job=build-job) from gitlab
+Download [latest artifacts](https://git.in.didww.com/denis.t/git-changelog/builds/artifacts/v1.1.1/download?job=build-job) from gitlab
 
 in the directory where you download it run:
 ```
 unzip artifacts.zip -d git-changelog
-sudo pip install git-changelog/dist/git_changelog-1.1.tar.gz
+sudo pip install git-changelog/dist/git_changelog-1.1.1.tar.gz
 ```
 
 ## Upgrade
 ```
-sudo pip install -U git_changelog-1.1.tar.gz
+sudo pip install -U git_changelog-1.1.1.tar.gz
 ```
 
 ## Uninstall
@@ -60,8 +60,8 @@ Project path: /home/senid/projects/my/git_changelog
 Related path to changelog: debian/changelog
 Package name: git-changelog-app
 Version (default 1.0.1): 
-From commit (default HEAD 2b6c033a15e10065f6ae02169f7852642f788a67): HEAD~2
-To commit: HEAD 2b6c033a15e10065f6ae02169f7852642f788a67
+From commit (default HEAD): HEAD~2
+To commit: HEAD
 git-changelog-app (1.0.1) wheezy; urgency=low
   * add script distribution
   * small upgrades
