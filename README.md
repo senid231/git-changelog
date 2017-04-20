@@ -46,24 +46,32 @@ sudo pip install -U git_changelog-1.1.1.tar.gz
 sudo pip uninstall git_changelog
 ```
 
-## Example
+## Usage
 
-Will append version details to the top of `debian/changelog` and print it to output
+Will append version details to the top of `debian/changelog`
+
+`-A` flag allows to create bump commit in separate branch for MR
 
 ```
-$ mkdir -p debian
-$ echo "git-changelog-app (1.0.0) wheezy; urgency=low" > debian/changelog
-$ echo "  * initial" >> debian/changelog
-$ echo " -- Denis <senid231@gmail.com>  Sun, 9 Apr 2017 20:32:00 +0300" >> debian/changelog
-$ changelog-git
+$ changelog-git -A
 Project path: /home/senid/projects/my/git_changelog
 Related path to changelog: debian/changelog
 Package name: git-changelog-app
 Version (default 1.0.1): 
 From commit (default HEAD): HEAD~2
 To commit: HEAD
+```
+will create new branch `bump-1.0.1` from `HEAD`, 
+append changelog with:
+```
 git-changelog-app (1.0.1) wheezy; urgency=low
   * add script distribution
   * small upgrades
  -- Denis <senid231@gmail.com>  Sun, 9 Apr 2017 20:35:15 +0300
+ ```
+and commit it with message:
+```
+bump 1.0.1
+
+[ci skip] [changelog skip]
 ```
