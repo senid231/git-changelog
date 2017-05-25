@@ -1,5 +1,6 @@
 import os
 import sys
+import codecs
 from glob import glob
 from getopt import getopt, GetoptError
 from git import Repo, InvalidGitRepositoryError
@@ -254,7 +255,10 @@ def set_version(options, default, git_logger):
 
 def set_from_commit(options, git_logger, repo):
     if len(repo.tags) > 0:
-        default = max_by_lambda(repo.tags, (lambda x: x.tag.tagged_date)).tag.tag
+        default = max_by_lambda(
+            repo.tags,
+            (lambda x: x.tag.tagged_date if x.tag else x.commit.committed_date)
+        ).tag.tag
     else:
         default = "HEAD"
 
@@ -304,10 +308,12 @@ def commit_changelog(changelog_path, version, repo, git_logger):
 def modify_changelog_file(path, text, git_logger):
     # append changelog
     if not os.path.exists(path):
-        os.makedirs(os.path.dirname(path))
+        changelog_dir = os.path.dirname(path)
+        if not os.path.exists(changelog_dir):
+            os.makedirs(changelog_dir)
         open(path, "w+").close()
         git_logger.debug("create changelog '%s'" % path)
-    with open(path, "r+") as f:
+    with codecs.open(path, mode="r+", encoding="utf-8") as f:
         content = f.read()
         f.seek(0, 0)
         f.write(text + content)
