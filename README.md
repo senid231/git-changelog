@@ -28,17 +28,17 @@ Options:
 ```
 
 ## Install
-Download [latest artifacts](https://git.in.didww.com/denis.t/git-changelog/builds/artifacts/v1.1.1/download?job=build-job) from gitlab
+Download [latest artifacts](https://git.in.didww.com/denis.t/git-changelog/builds/artifacts/v1.1.2/download?job=build-job) from gitlab
 
 in the directory where you download it run:
 ```
 unzip artifacts.zip -d git-changelog
-sudo pip install git-changelog/dist/git_changelog-1.1.1.tar.gz
+sudo pip install git-changelog/dist/git_changelog-1.1.2.tar.gz
 ```
 
 ## Upgrade
 ```
-sudo pip install -U git_changelog-1.1.1.tar.gz
+sudo pip install -U git_changelog-1.1.2.tar.gz
 ```
 
 ## Uninstall
