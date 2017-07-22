@@ -258,7 +258,7 @@ def set_from_commit(options, git_logger, repo):
         default = max_by_lambda(
             repo.tags,
             (lambda x: x.tag.tagged_date if x.tag else x.commit.committed_date)
-        ).tag.tag
+        ).name
     else:
         default = "HEAD"
 
