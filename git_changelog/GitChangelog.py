@@ -32,7 +32,7 @@ def parse_args():
     try:
         opts, args = getopt(sys.argv[1:], "hvdqADY", [
             "help", "version", "debug", "auto-commit", "detailed", "yes",
-            "project-path=", "next-version=", "package-name=", "changelog-path",
+            "project-path=", "next-version=", "package-name=", "changelog-path=",
             "to-commit=", "from-commit=", "urgency=", "debian-branch=", "user-name=", "user-email="
         ])
         for o, a in opts:
