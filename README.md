@@ -75,3 +75,10 @@ bump 1.0.1
 
 [ci skip] [changelog skip]
 ```
+
+# Building
+```shell
+cd /path/to/project
+python setup.py sdist
+# file with your build will be in ./dist/git_changelog-X.Y.Z.tar.gz
+```
