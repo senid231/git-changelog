@@ -28,12 +28,11 @@ Options:
 ```
 
 ## Install
-Download [latest artifacts](https://git.in.didww.com/denis.t/git-changelog/builds/artifacts/v1.1.3/download?job=build-job) from gitlab
+Download [latest build](https://www.dropbox.com/s/vmc879pf7al1ya0/git_changelog-1.1.3.tar.gz?dl=0) from dropbox
 
 in the directory where you download it run:
 ```
-unzip artifacts.zip -d git-changelog
-sudo pip install git-changelog/dist/git_changelog-1.1.3.tar.gz
+sudo pip install git_changelog-1.1.3.tar.gz
 ```
 
 ## Upgrade
@@ -74,4 +73,11 @@ and commit it with message:
 bump 1.0.1
 
 [ci skip] [changelog skip]
+```
+
+# Building
+```shell
+cd /path/to/project
+python setup.py sdist
+# file with your build will be in ./dist/git_changelog-X.Y.Z.tar.gz
 ```
