@@ -28,12 +28,11 @@ Options:
 ```
 
 ## Install
-Download [latest artifacts](https://git.in.didww.com/denis.t/git-changelog/builds/artifacts/v1.1.3/download?job=build-job) from gitlab
+Download [latest build](https://www.dropbox.com/s/vmc879pf7al1ya0/git_changelog-1.1.3.tar.gz?dl=0) from dropbox
 
 in the directory where you download it run:
 ```
-unzip artifacts.zip -d git-changelog
-sudo pip install git-changelog/dist/git_changelog-1.1.3.tar.gz
+sudo pip install git_changelog-1.1.3.tar.gz
 ```
 
 ## Upgrade
