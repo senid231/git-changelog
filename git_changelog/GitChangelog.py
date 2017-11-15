@@ -3,6 +3,7 @@ import sys
 import codecs
 from glob import glob
 from getopt import getopt, GetoptError
+from re import match, sub, IGNORECASE
 from git import Repo, InvalidGitRepositoryError
 from git_changelog.Utils import match_any_pattern, max_by_lambda, ask_question, local_datetime
 from git_changelog.Constants import EXIT_CODES, LOG_LEVELS, SKIP_COMMIT_PATTERNS
@@ -27,13 +28,14 @@ def parse_args():
         "debian_branch": "",
         "user_name": "",
         "user_email": "",
+        "merges_only": False,
     }
 
     try:
         opts, args = getopt(sys.argv[1:], "hvdqADY", [
             "help", "version", "debug", "auto-commit", "detailed", "yes",
             "project-path=", "next-version=", "package-name=", "changelog-path=",
-            "to-commit=", "from-commit=", "urgency=", "debian-branch=", "user-name=", "user-email="
+            "to-commit=", "from-commit=", "urgency=", "debian-branch=", "user-name=", "user-email=", "merges-only"
         ])
         for o, a in opts:
             if o in ("-h", "--help"):
@@ -49,6 +51,7 @@ def parse_args():
                     "  -A, --auto-commit         Create new branch and commit changelog.\n"
                     "  -D, --detailed            Do not skip guessed prompts.\n"
                     "  -Y, --yes                 Skip all prompts with defaults.\n"
+                    "  --merges-only             Include second line of 'merge branch ...' commits only.\n"
                     "  --project-path=<path>     Path to project root (default current directory).\n"
                     "  --next-version=<version>  Set next changelog version (default ask in prompt).\n"
                     "  --package-name=<name>     Set package name (default ask in prompt).\n"
@@ -94,6 +97,8 @@ def parse_args():
                 options["user_name"] = a
             if o == "--user-email":
                 options["user_email"] = a
+            if o == "--merges-only":
+                options["merges_only"] = True
 
     except GetoptError, e:
         Logger(LOG_LEVELS.ERROR).error("changelog-git: Unknown option '%s'" % e.opt)
@@ -321,10 +326,10 @@ def modify_changelog_file(path, text, git_logger):
 
 
 def generate_changelog(
-        from_rev, to_rev, repo, package_name, version, debian_branch, urgency, name, email, current_time, git_logger
+        from_rev, to_rev, repo, package_name, version, debian_branch, urgency, name, email, current_time, git_logger, merges_only
 ):
     changelog_template = "%s (%s) %s; urgency=%s\n%s\n -- %s <%s>  %s\n\n"
-    log = generate_description(from_rev=from_rev, to_rev=to_rev, repo=repo)
+    log = generate_description(from_rev=from_rev, to_rev=to_rev, repo=repo, merges_only=merges_only)
 
     changelog_text = changelog_template % (
         package_name, version, debian_branch, urgency, log, name, email, current_time
@@ -333,17 +338,33 @@ def generate_changelog(
     return changelog_text
 
 
-def generate_description(from_rev, to_rev, repo):
+def _merges_only_get_description_line_from_commit_message(commit_message):
+    lines = [ line for line in commit_message.splitlines()[2:] if line != "" ]
+    description_line = ". ".join(lines)
+    description_line = sub(r"See\smerge\srequest\s(!\d+)", r"\1", description_line, flags=IGNORECASE)
+    return description_line
+
+
+def generate_description(from_rev, to_rev, repo, merges_only):
     if from_rev == to_rev:
         commits = [repo.commit(to_rev)]
     else:
         commits = list(repo.iter_commits("%s...%s" % (from_rev, to_rev)))
     included_commits = []
-    for commit in commits:
-        if not match_any_pattern(commit.message, SKIP_COMMIT_PATTERNS):
-            included_commits.append(commit)
+    if merges_only:
+        for commit in commits:
+            # matches if starts with "Merge branch '" but is not folowed by "bump-"
+            if match(r"^merge\sbranch\s['\"](?!bump-)", commit.message, flags=IGNORECASE) \
+                    and not match_any_pattern("\n".join(commit.message.splitlines()[1:]), SKIP_COMMIT_PATTERNS):
+                description_line = _merges_only_get_description_line_from_commit_message(commit.message)
+                included_commits.append((commit, description_line))
+    else:
+        for commit in commits:
+            if not match_any_pattern(commit.message, SKIP_COMMIT_PATTERNS):
+                description_line = commit.message.splitlines()[0]
+                included_commits.append((commit, description_line))
 
-    return "\n".join([("  * %s" % commit.message.split("\n")[0]) for commit in included_commits])
+    return "\n".join([("  * %s" % commit[1]) for commit in included_commits])
 
 
 def process():
@@ -403,7 +424,8 @@ def process():
         name=name,
         email=email,
         current_time=current_time,
-        git_logger=git_logger
+        git_logger=git_logger,
+        merges_only=options["merges_only"]
     )
 
     # append to changelog
