@@ -1,11 +1,11 @@
-from re import match, IGNORECASE
+from re import search, IGNORECASE
 from tzlocal import get_localzone
 from datetime import datetime
 
 
 def match_any_pattern(text, patterns):
     for pattern in patterns:
-        if match(string=text, pattern=pattern, flags=IGNORECASE):
+        if search(string=text, pattern=pattern, flags=IGNORECASE):
             return True
     return False
 

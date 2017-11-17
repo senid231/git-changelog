@@ -354,7 +354,7 @@ def generate_description(from_rev, to_rev, repo, merges_only):
     if merges_only:
         for commit in commits:
             # matches if starts with "Merge branch '" but is not folowed by "bump-"
-            if match(r"^merge\sbranch\s['\"](?!bump-)", commit.message, flags=IGNORECASE) \
+            if match(r"merge\sbranch\s['\"](?!bump-)", commit.message, flags=IGNORECASE) \
                     and not match_any_pattern("\n".join(commit.message.splitlines()[1:]), SKIP_COMMIT_PATTERNS):
                 description_line = _merges_only_get_description_line_from_commit_message(commit.message)
                 included_commits.append((commit, description_line))
