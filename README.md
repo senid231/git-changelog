@@ -28,16 +28,16 @@ Options:
 ```
 
 ## Install
-Download [latest build](https://www.dropbox.com/s/vmc879pf7al1ya0/git_changelog-1.1.3.tar.gz?dl=0) from dropbox
+Download [latest build](https://www.dropbox.com/s/50tm3yg5p415yxd/git_changelog-1.1.4.tar.gz?dl=0) from dropbox
 
 in the directory where you download it run:
 ```
-sudo pip install git_changelog-1.1.3.tar.gz
+sudo pip install git_changelog-1.1.4.tar.gz
 ```
 
 ## Upgrade
 ```
-sudo pip install -U git_changelog-1.1.3.tar.gz
+sudo pip install -U git_changelog-1.1.4.tar.gz
 ```
 
 ## Uninstall
