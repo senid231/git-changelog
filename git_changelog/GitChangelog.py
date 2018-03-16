@@ -3,12 +3,14 @@ import sys
 import codecs
 from glob import glob
 from getopt import getopt, GetoptError
-from re import match, sub, IGNORECASE
+from itertools import ifilterfalse
+from re import search, IGNORECASE
 from git import Repo, InvalidGitRepositoryError
 from git_changelog.Utils import match_any_pattern, max_by_lambda, ask_question, local_datetime
 from git_changelog.Constants import EXIT_CODES, LOG_LEVELS, SKIP_COMMIT_PATTERNS
 from git_changelog.Logger import Logger
 from git_changelog import __version__
+from git_changelog.CommitFilter import CommitFilter
 
 
 def parse_args():
@@ -18,6 +20,7 @@ def parse_args():
         "debug": False,
         "quiet": False,
         "skip_prompt": False,
+        "pretty_merges": False,
         "version": "",
         "package_name": "",
         "changelog_path": "",
@@ -28,14 +31,16 @@ def parse_args():
         "debian_branch": "",
         "user_name": "",
         "user_email": "",
-        "merges_only": False,
+        "max_parents": float("inf"),
+        "min_parents": 0
     }
 
     try:
-        opts, args = getopt(sys.argv[1:], "hvdqADY", [
-            "help", "version", "debug", "auto-commit", "detailed", "yes",
+        opts, args = getopt(sys.argv[1:], "hvdqADYM", [
+            "help", "version", "debug", "auto-commit", "detailed", "yes", "pretty-merges"
             "project-path=", "next-version=", "package-name=", "changelog-path=",
-            "to-commit=", "from-commit=", "urgency=", "debian-branch=", "user-name=", "user-email=", "merges-only"
+            "to-commit=", "from-commit=", "urgency=", "debian-branch=", "user-name=", "user-email=",
+            "max-parents=", "min-parents="
         ])
         for o, a in opts:
             if o in ("-h", "--help"):
@@ -51,7 +56,7 @@ def parse_args():
                     "  -A, --auto-commit         Create new branch and commit changelog.\n"
                     "  -D, --detailed            Do not skip guessed prompts.\n"
                     "  -Y, --yes                 Skip all prompts with defaults.\n"
-                    "  --merges-only             Include second line of 'merge branch ...' commits only.\n"
+                    "  -M, --pretty-merges       Merge commit message is formated in pretty one line.\n"
                     "  --project-path=<path>     Path to project root (default current directory).\n"
                     "  --next-version=<version>  Set next changelog version (default ask in prompt).\n"
                     "  --package-name=<name>     Set package name (default ask in prompt).\n"
@@ -61,7 +66,9 @@ def parse_args():
                     "  --urgency=<name>          Set urgency (default from changelog).\n"
                     "  --debian-branch=<ref>     Set debian branch (default from changelog).\n"
                     "  --user-name=<name>        Set user name (default from git config).\n"
-                    "  --user-email=<email>      Set user email (default from git config)."
+                    "  --user-email=<email>      Set user email (default from git config).\n"
+                    "  --max-parents=<count>     Chooses commits with selected maximum parents count.\n"
+                    "  --min-parents=<count>     Chooses commits with selected mininum parents count."
                 )
                 sys.exit(0)
             if o in ("-v", "--version"):
@@ -77,6 +84,8 @@ def parse_args():
                 options["detailed"] = True
             if o in ("-Y", "--yes"):
                 options["skip_prompt"] = True
+            if o in ("-M", "--pretty-merges"):
+                options["pretty_merges"] = True
             if o == "--project-path":
                 options["project_path"] = a
             if o == "--next-version":
@@ -97,8 +106,18 @@ def parse_args():
                 options["user_name"] = a
             if o == "--user-email":
                 options["user_email"] = a
-            if o == "--merges-only":
-                options["merges_only"] = True
+            if o == "--max-parents":
+                try:
+                    options["max_parents"] = int(a)
+                except ValueError as e:
+                    Logger(LOG_LEVELS.ERROR).error("'--max-parents' must be number")
+                    sys.exit(EXIT_CODES.WRONG_ARGUMENTS)
+            if o == "--min-parents":
+                try:
+                    options["min_parents"] = int(a)
+                except ValueError as e:
+                    Logger(LOG_LEVELS.ERROR).error("'--min-parents' must be number")
+                    sys.exit(EXIT_CODES.WRONG_ARGUMENTS)
 
     except GetoptError, e:
         Logger(LOG_LEVELS.ERROR).error("changelog-git: Unknown option '%s'" % e.opt)
@@ -110,6 +129,10 @@ def parse_args():
 
     if options["skip_prompt"] and options["detailed"]:
         Logger(LOG_LEVELS.ERROR).error("changelog-git: -D/--detailed and -Y/--yes can't be set in same time")
+        sys.exit(EXIT_CODES.WRONG_ARGUMENTS)
+
+    if options["min_parents"] > options["max_parents"]:
+        Logger(LOG_LEVELS.ERROR).error("changelog-git: --min-parents is greater than --max-parents")
         sys.exit(EXIT_CODES.WRONG_ARGUMENTS)
 
     return options
@@ -326,10 +349,10 @@ def modify_changelog_file(path, text, git_logger):
 
 
 def generate_changelog(
-        from_rev, to_rev, repo, package_name, version, debian_branch, urgency, name, email, current_time, git_logger, merges_only
+        from_rev, to_rev, repo, package_name, version, debian_branch, urgency, name, email, current_time, git_logger, commit_filter, pretty_merges
 ):
     changelog_template = "%s (%s) %s; urgency=%s\n%s\n -- %s <%s>  %s\n\n"
-    log = generate_description(from_rev=from_rev, to_rev=to_rev, repo=repo, merges_only=merges_only)
+    log = generate_description(from_rev=from_rev, to_rev=to_rev, repo=repo, commit_filter=commit_filter, pretty_merges=pretty_merges)
 
     changelog_text = changelog_template % (
         package_name, version, debian_branch, urgency, log, name, email, current_time
@@ -338,33 +361,35 @@ def generate_changelog(
     return changelog_text
 
 
-def _merges_only_get_description_line_from_commit_message(commit_message):
-    lines = [ line for line in commit_message.splitlines()[2:] if line != "" ]
-    description_line = ". ".join(lines)
-    description_line = sub(r"See\smerge\srequest\s(!\d+)", r"\1", description_line, flags=IGNORECASE)
-    return description_line
+def generate_pretty_merge_description(message_lines):
+    """
+    Used to generate pretty changelog entries from merge commits.
+    Looks for pull request id in summary. Discards summary. Deletes empty lines and appends 'See pull request id' if id was found.
+    """
+    m = search(r"pull\s+request\s+#([0-9]+)", message_lines[0], flags=IGNORECASE)
+    lines = [ line for line in message_lines[2:] if line != "" ]
+    if m:
+        lines.append("See pull request #%s" % m.group(1))
+    lines[0] = "  * %s" % lines[0]
+    for i in range(1,len(lines)):
+        lines[i] = "    %s" % lines[i]
+    return "\n".join(lines)
 
 
-def generate_description(from_rev, to_rev, repo, merges_only):
+def generate_description(from_rev, to_rev, repo, commit_filter=None, pretty_merges=False):
     if from_rev == to_rev:
-        commits = [repo.commit(to_rev)]
+        commits = repo.commit(to_rev)
     else:
-        commits = list(repo.iter_commits("%s...%s" % (from_rev, to_rev)))
-    included_commits = []
-    if merges_only:
-        for commit in commits:
-            # matches if starts with "Merge branch '" but is not folowed by "bump-"
-            if match(r"merge\sbranch\s['\"](?!bump-)", commit.message, flags=IGNORECASE) \
-                    and not match_any_pattern("\n".join(commit.message.splitlines()[1:]), SKIP_COMMIT_PATTERNS):
-                description_line = _merges_only_get_description_line_from_commit_message(commit.message)
-                included_commits.append((commit, description_line))
+        commits = repo.iter_commits("%s...%s" % (from_rev, to_rev))
+    included_commits = ifilterfalse(commit_filter.match, commits)
+    mes = []
+    for commit in included_commits:
+        if pretty_merges and len(commit.parents) > 1:
+            mes.append(generate_pretty_merge_description(commit.message.split("\n")))
+        else:
+            mes.append("  * %s" % commit.summary)
     else:
-        for commit in commits:
-            if not match_any_pattern(commit.message, SKIP_COMMIT_PATTERNS):
-                description_line = commit.message.splitlines()[0]
-                included_commits.append((commit, description_line))
-
-    return "\n".join([("  * %s" % commit[1]) for commit in included_commits])
+        return "\n".join(mes)
 
 
 def process():
@@ -412,6 +437,9 @@ def process():
         email = repo.config_reader().get("user", "email")
     git_logger.debug("set email to '%s" % email)
 
+    # set up Filter
+    commit_filter = CommitFilter(SKIP_COMMIT_PATTERNS, (options["min_parents"], options["max_parents"]))
+
     # generate changelog text
     changelog_text = generate_changelog(
         from_rev=from_rev,
@@ -425,7 +453,8 @@ def process():
         email=email,
         current_time=current_time,
         git_logger=git_logger,
-        merges_only=options["merges_only"]
+        commit_filter=commit_filter,
+        pretty_merges=options["pretty_merges"]
     )
 
     # append to changelog
