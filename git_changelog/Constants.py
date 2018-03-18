@@ -34,8 +34,7 @@ LOG_LEVELS = Constants({
 })
 
 SKIP_COMMIT_PATTERNS = frozenset([
-    "^merge branch",
-    "^bump",
+    "bump",
     "\[changelog skip\]",
     "\[skip changelog\]"
 ])
