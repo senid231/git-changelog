@@ -6,5 +6,5 @@
 	dh $@ --with python2
 
 override_dh_auto_install:
-	dh_atuo_install
-	install -v -m0755 -D tools/changelog-gen $(DESTDIR)/usr/bin/changelog-gen
+	dh_auto_install
+	dh_install tools/changelog-gen /usr/bin/

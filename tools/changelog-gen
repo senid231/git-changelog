@@ -10,17 +10,20 @@ show_usage() {
 
 	-C <project dir>	- change to this dir before start
 	-f <chlog file>		- path to debian changelog. Default is debian/changelog
-	-e <email>		- email of changelog entry author. Overrides DEBEMAIL env variable. Default is $DEFAULT_EMAIL
-	-n <name>		- name of changelog entry author. Overrides DEBFULLNAME env variable. Default is $USER
+	-e <email>		- email of changelog entry author. Overrides DEBEMAIL env variable.
+	                          Default is $DEFAULT_EMAIL
+	-n <name>		- name of changelog entry author. Overrides DEBFULLNAME env variable.
+	                          Default is $USER
 	-p <pkg name>		- name of package. Default is project directory name
 	-d <release codename>	- debian release codename. Default is taken from lsb_release -sc
 	-u <urgency>		- urgency level. Default is 'low'
 	-F <extended regex>	- extended regexep filter for grep which filters tags that we want to use.
-				  It is applied before processing by sed patterns
+	                          It is applied before processing by sed patterns
 	-A			- append on top of 
-	<sed pattern>		- every tag is passed through these sed patterns in order. It is used to convert git tag to valid
-	                          debian version number. E.g. 's/_/~/g' to substitude any underscores on tilde. Each resultig
-	                          version is then checked by dpkg --compare-versions
+	<sed pattern>		- every tag is passed through these sed patterns in order.
+	                          It is used to convert git tag to valid debian version number.
+	                          E.g. 's/_/~/g' to substitude any underscores on tilde.
+	                          Each resultig version is then checked by dpkg --compare-versions
 	EOF
 }
 
@@ -113,15 +116,14 @@ fi
 
 
 # check cd path
-if [[ $CD_TO && -d $CD_TO ]]; then
-	CD_TO_REAL="$(realpath "$CD_TO")"
+if [[ -n "$CD_TO" && -d "$CD_TO" ]]; then
+	if ! CD_TO_REAL="$(realpath "$CD_TO")"; then
+		fail "Cannot cd to \"$CD_TO\". Aborting..."
+	fi
 	OLD_DIR="$PWD"
 	echo "Changing to $CD_TO_REAL"
 	cd "$CD_TO_REAL" || fail "Failed to cd to \"$CD_TO_REAL\". Aborting..."
-else
-	fail "Cannot cd to \"$CD_TO\". Aborting..."
 fi
-
 
 # set PKG_NAME
 if [[ -z $PKG_NAME ]]; then
@@ -201,11 +203,12 @@ for t in $tags; do
 	for p in "${sed_patterns[@]}"; do
 		if ! ver="$(sed "$p" < <(echo "$ver"))"; then
 			fail "Bad sed pattern: $p"
-		elif ! dpkg --compare-versions "$ver" ge "0.0"; then
-			fail "Bad resulting debian version: $ver"
 		fi
 		debug "modifying tag $t by pattern $p result: $ver"
 	done
+	if ! dpkg --compare-versions "$ver" ge "0.0"; then
+		fail "Bad resulting debian version: $ver"
+	fi
 	versions[$ver]="$t"
 done
 debug "$(for v in "${!versions[@]}"; do echo "versions[$v]=${versions[$v]}"; done)"
@@ -220,6 +223,8 @@ for v in $indexes_sorted; do
 	echo "Appending version $v from $prev to $next"
 	changelog-git \
 		-q \
+		-M \
+		--min-parents=2 \
 		--from-commit="$prev" \
 		--to-commit="$next" \
 		--next-version="$v" \
