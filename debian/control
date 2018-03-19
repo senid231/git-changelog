@@ -1,0 +1,18 @@
+Source: git-changelog
+Section: devel
+Priority: extra
+Maintainer: Denis Talakevich <senid231@gmail.com>
+Build-Depends: debhelper (>=9),
+               dh-python,
+               python-all,
+               python-setuptools,
+               python3-all
+Standards-Version: 3.9.8
+Homepage: https://github.com/senid231/git-changelog
+X-Python-Version: >= 2.6
+
+Package: git-changelog
+Architecture: all
+Multi-Arch: foreign
+Depends: ${misc:Depends}, ${python:Depends}
+Description: Debian package changelog generator from git

@@ -385,7 +385,7 @@ def generate_description(from_rev, to_rev, repo, commit_filter=None, pretty_merg
     mes = []
     for commit in included_commits:
         if pretty_merges and len(commit.parents) > 1:
-            mes.append(generate_pretty_merge_description(commit.message.split("\n")))
+            mes.append(generate_pretty_merge_description(commit.message.splitlines()))
         else:
             mes.append("  * %s" % commit.summary)
     else:

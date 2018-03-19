@@ -1,0 +1,275 @@
+#!/bin/bash
+
+show_usage() {
+	cat >&2 <<-EOF
+	usage: $0 [-h] [-C <project dir>] [-f <chlog file>] [-e <email>] [-n <name>] [<sed pattern> [<sed pattern> ...]]
+
+	This script is used to generate complete debian changelog from git tags. It gathers tag reachable from current branch
+	in repository, filters them (-F option), derives corresponding debian versions (<sed pattern>), sorts them and runs
+	git-changelog.
+
+	-C <project dir>	- Change to this dir before start
+	-f <chlog file>		- Path to debian changelog. Default is debian/changelog
+	-e <email>		- Email of changelog entry author. Overrides DEBEMAIL env variable.
+	                          Default is $DEFAULT_EMAIL
+	-n <name>		- Name of changelog entry author. Overrides DEBFULLNAME env variable.
+	                          Default is $USER
+	-p <pkg name>		- Name of package. Default is project directory name
+	-d <release codename>	- Debian release codename. Default is taken from lsb_release -sc
+	-u <urgency>		- Urgency level. Default is 'low'
+	-F <extended regex>	- Extended regexep filter for grep which filters tags that we want to use.
+	                          It is applied before processing by sed patterns
+	-A			- Append a snapshot entry with current version in format
+	                          "\${cur_ver}+\${num_of_commits_from_latest_tag_to_HEAD}" if
+	                          number of commits from latest tag is greate than 0
+	<sed pattern>		- Every tag is passed through these sed patterns in order.
+	                          It is used to convert git tag to valid debian version number.
+	                          E.g. 's/_/~/g' to substitude any underscores on tilde.
+	                          Each resultig version is then checked by dpkg --compare-versions
+	EOF
+}
+
+debug() {
+	[[ -n $DEBUG ]] && echo "$@" >&2
+}
+
+fail() {
+	echo -e "\e[31m$*\e[0m" >&2
+	exit 1
+}
+
+warn() {
+	echo -e "\e[33m$*\e[0m" >&2
+}
+
+CHLOG_PATH="debian/changelog"
+DEFAULT_EMAIL="${USER}@$(hostname)"
+EMAIL="${DEBEMAIL:-$DEFAULT_EMAIL}"
+NAME="${DEBFULLNAME:-$USER}"
+URGENCY="low"
+
+# read args
+while getopts ":hC:f:e:n:p:d:u:F:A" opt; do
+	case $opt in
+		h)
+			show_usage
+			exit 0
+			;;
+		C)
+			CD_TO="$OPTARG"
+			;;
+		f)
+			CHLOG_PATH="$OPTARG"
+			;;
+		e)
+			EMAIL="$OPTARG"
+			[[ -n $DEBEMAIL ]] && echo "Overriding DEBMAIL=$DEBEMAIL with $EMAIL"
+			debug "EMAIL=$EMAIL"
+			;;
+		n)
+			NAME="$OPTARG"
+			[[ -n $DEBFULLNAME ]] && echo "Overriding DEBFULLNAME=$DEBFULLNAME with $NAME"
+			debug "NAME=$NAME"
+			;;
+		p)
+			PKG_NAME="$OPTARG"
+			debug "PKG_NAME=$PKG_NAME"
+			;;
+		d)
+			RELEASE_CODENAME="$OPTARG"
+			debug "RELEASE_CODENAME=$RELEASE_CODENAME"
+			;;
+		u)
+			URGENCY="$OPTARG"
+			debug "URGENCY=$URGENCY"
+			;;
+		F)
+			GREP_FILTER="$OPTARG"
+			debug "GREP_FILTER=$GREP_FILTER"
+			;;
+		A)
+			APPEND_SNAPSHOT_ENTRY="true"
+			debug "APPEND_SNAPSHOT_ENTRY=$APPEND_SNAPSHOT_ENTRY"
+			;;
+		*)
+			show_usage
+			fail "Invalid option: -$OPTARG"
+	esac
+done
+shift $((OPTIND-1))
+
+
+# read sed patterns
+declare -a sed_patterns
+i=0
+while [[ $# -gt 0 ]]; do
+	sed_patterns[$i]="$1"
+	i="$((i + 1))"
+	shift
+done
+unset i
+debug "$(for p in "${!sed_patterns[@]}"; do echo "sed_patterns[$p]=${sed_patterns[$p]}"; done)"
+
+
+# set default RELEASE_CODENAME
+if [[ -z $RELEASE_CODENAME ]]; then
+	if RELEASE_CODENAME="$(lsb_release -sc)"; then
+		debug "RELEASE_CODENAME=$RELEASE_CODENAME"
+	else
+		fail "Failed to set RELEASE_CODENAME automatically. Aborting..."
+	fi
+fi
+
+
+# check cd path
+if [[ -n "$CD_TO" && -d "$CD_TO" ]]; then
+	if ! CD_TO_REAL="$(realpath "$CD_TO")"; then
+		fail "Cannot cd to \"$CD_TO\". Aborting..."
+	fi
+	OLD_DIR="$PWD"
+	echo "Changing to $CD_TO_REAL"
+	cd "$CD_TO_REAL" || fail "Failed to cd to \"$CD_TO_REAL\". Aborting..."
+fi
+
+# set PKG_NAME
+if [[ -z $PKG_NAME ]]; then
+	PKG_NAME="$(basename "$PWD")"
+	echo "PKG_NAME is not supplied. Using \"$PKG_NAME\""
+fi
+
+
+# check changelog path
+echo "Changelog path: $CHLOG_PATH"
+if [[ -f $CHLOG_PATH ]]; then
+	if [[ $(wc -w < <(cat "$CHLOG_PATH")) -gt 0 ]]; then
+		warn "Warning, chlog exists and non-empty. Chlog will be appended on top"
+	fi
+fi
+
+
+# check git
+if ! git_version="$(git --version | awk '{print $3}')"; then
+	fail "git must be installed. Aborting..."
+fi
+
+
+# check changelog-git
+if ! command -v changelog-git > /dev/null; then
+	fail "package git-changelog must me installed. Aborting..."
+fi
+
+
+# get first commit in repo
+if ! git_first_commit="$(git rev-list --max-parents=0 HEAD)"; then
+	fail "seems this is not git repository. Aborting..."
+elif [[ -z "$git_first_commit" ]]; then
+	fail "Cannot get firts commit. Aborting..."
+elif [[ "$(echo "$git_first_commit" | wc -w)" -gt 1 ]]; then
+	warn "Warning, there are serveral commits without parents: $git_first_commit"
+	warn "This might mean, that the project is originated from several other projects which were merged in one, \
+		or you performed a shallow repository clone (e.g. git clone --depth 50)"
+	warn "The first commit is used as initial"
+	read -r git_first_commit git_first_commit_other < <(echo "$git_first_commit")
+fi
+debug "git_first_commit=$git_first_commit"
+debug "git_first_commit_other=$git_first_commit_other"
+
+
+# get last commit in repo
+git_last_commit="$(git rev-parse HEAD)"
+debug "git_last_commit=$git_last_commit"
+
+
+# get tags reachable from this branch
+if dpkg --compare-versions "$git_version" "ge" "2.7.0"; then
+	tags="$(git tag --list --merged)"
+else
+	tags="$(git log --simplify-by-decoration --decorate --pretty=oneline --reverse | \
+		grep -oP 'tag: .+?[,)]' | \
+		sed 's/tag: \(.*\)[),]/\1/')"
+fi
+debug "tags=$tags"
+
+if [[ $(echo "$tags" | wc -w) -eq 0 ]]; then
+	fail "No tags were found in this repo. Aborting..."
+fi
+
+
+# filter these tags out
+if [[ -n $GREP_FILTER ]]; then
+	tags="$(for t in $tags; do echo "$t"; done | grep -e "$GREP_FILTER")"
+fi
+
+
+# form a hash of deb versions pointing to corresponding tags
+declare -A versions
+for t in $tags; do
+	ver="$t"
+
+	for p in "${sed_patterns[@]}"; do
+		if ! ver="$(sed "$p" < <(echo "$ver"))"; then
+			fail "Bad sed pattern: $p"
+		fi
+		debug "modifying tag $t by pattern $p result: $ver"
+	done
+	if ! dpkg --compare-versions "$ver" ge "0.0"; then
+		fail "Bad resulting debian version: $ver"
+	fi
+	versions[$ver]="$t"
+done
+debug "$(for v in "${!versions[@]}"; do echo "versions[$v]=${versions[$v]}"; done)"
+
+
+# get a list of sorted hash indexes
+declare -a indexes_sorted
+i=0
+for sindex in $(for index in "${!versions[@]}"; do echo "$index"; done | sort -V); do
+	indexes_sorted[$i]="$sindex"
+	i="$((i + 1))"
+done
+last_index="$((i - 1))"
+unset i
+debug "indexes_sorted=${indexes_sorted[*]}"
+
+
+# append snapshot entry
+if [[ -n $APPEND_SNAPSHOT_ENTRY ]]; then
+	last_ver="${indexes_sorted[$last_index]}"
+	num_of_commits_since_last_tag="$(git rev-list HEAD "^${versions[$last_ver]}" | wc -l)"
+	if [[ $num_of_commits_since_last_tag -gt 0 ]]; then
+		snapshot_ver="${last_ver}+${num_of_commits_since_last_tag}"
+		versions[$snapshot_ver]="HEAD"
+		indexes_sorted[$((last_index + 1))]="$snapshot_ver"
+		debug "indexes_sorted(with snapshot ver)=${indexes_sorted[*]}"
+	else
+		debug "num_of_commits_since_last_tag=$num_of_commits_since_last_tag <= 0. Skipping snapshot entry"
+	fi
+fi
+
+
+# generate chlog
+prev="$git_first_commit"
+for v in "${indexes_sorted[@]}"; do
+	next="${versions[$v]}"
+	echo "Appending version $v from $prev to $next"
+	changelog-git \
+		-q \
+		-M \
+		--min-parents=2 \
+		--from-commit="$prev" \
+		--to-commit="$next" \
+		--next-version="$v" \
+		--debian-branch="$RELEASE_CODENAME" \
+		--package-name="$PKG_NAME" \
+		--user-name="$NAME" \
+		--user-email="$EMAIL" \
+		--changelog-path="$CHLOG_PATH" \
+		|| fail "Something went wrong in changelog-git. Aborting..."
+	prev="$next"
+done
+
+
+# end
+if [[ -n $OLD_DIR ]]; then
+	cd "$OLD_DIR" || fail "Faild to cd back to \"$OLD_DIR\""
+fi
