@@ -165,11 +165,12 @@ if ! git_first_commit="$(git rev-list --max-parents=0 HEAD)"; then
 elif [[ -z "$git_first_commit" ]]; then
 	fail "Cannot get firts commit. Aborting..."
 elif [[ "$(echo "$git_first_commit" | wc -w)" -gt 1 ]]; then
-	warn "Warning, there are serveral commits without parents: $git_first_commit"
-	warn "This might mean, that the project is originated from several other projects which were merged in one, \
-		or you performed a shallow repository clone (e.g. git clone --depth 50)"
-	warn "The first commit is used as initial"
+	warn "Warning, there are serveral commits without parents:" 
+	warn "$git_first_commit"
+	warn "This might mean, that the project is originated from several other projects which were merged in one," \
+		"or you performed a shallow repository clone (e.g. git clone --depth 50)"
 	read -r git_first_commit git_first_commit_other < <(echo "$git_first_commit")
+	warn "Commit $git_first_commit is used as initial"
 fi
 debug "git_first_commit=$git_first_commit"
 debug "git_first_commit_other=$git_first_commit_other"
