@@ -366,13 +366,18 @@ def generate_pretty_merge_description(message_lines):
     Used to generate pretty changelog entries from merge commits.
     Looks for pull request id in summary. Discards summary. Deletes empty lines and appends 'See pull request id' if id was found.
     """
-    m = search(r"pull\s+request\s+#([0-9]+)", message_lines[0], flags=IGNORECASE)
     lines = [ line for line in message_lines[2:] if line != "" ]
+    if len(lines) == 0:
+        return "  * %s" % message_lines[0]
+
+    m = search(r"pull\s+request\s+#([0-9]+)", message_lines[0], flags=IGNORECASE)
     if m:
         lines.append("See pull request #%s" % m.group(1))
+
     lines[0] = "  * %s" % lines[0]
     for i in range(1,len(lines)):
         lines[i] = "    %s" % lines[i]
+
     return "\n".join(lines)
 
 
