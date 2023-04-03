@@ -19,7 +19,7 @@ def max_by_lambda(collection, func):
 
 
 def ask_question(prompt, default_answer):
-    answer = raw_input(prompt)
+    answer = input(prompt)
     return answer if answer else default_answer
 
 

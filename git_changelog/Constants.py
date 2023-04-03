@@ -4,7 +4,7 @@ class Constants:
 
     def __init__(self, constants=None):
         if constants is not None:
-            for name, value in constants.iteritems():
+            for name, value in constants.items():
                 self.__dict__[name] = value
 
     def __setattr__(self, name, value):

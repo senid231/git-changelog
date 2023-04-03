@@ -1,4 +1,4 @@
-from Constants import LOG_LEVELS
+from .Constants import LOG_LEVELS
 from sys import stderr
 
 
@@ -15,7 +15,7 @@ class Logger:
     def write_log(self, log_level, message):
         if log_level >= self.log_level:
             if log_level != LOG_LEVELS.ERROR:
-                print message + "\n"
+                print(message + "\n")
             else:
                 stderr.write(message + "\n")
 
