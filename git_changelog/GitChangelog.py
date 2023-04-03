@@ -3,7 +3,7 @@ import sys
 import codecs
 from glob import glob
 from getopt import getopt, GetoptError
-from itertools import ifilterfalse
+from itertools import filterfalse
 from re import search, IGNORECASE
 from git import Repo, InvalidGitRepositoryError
 from git_changelog.Utils import match_any_pattern, max_by_lambda, ask_question, local_datetime
@@ -119,7 +119,7 @@ def parse_args():
                     Logger(LOG_LEVELS.ERROR).error("'--min-parents' must be number")
                     sys.exit(EXIT_CODES.WRONG_ARGUMENTS)
 
-    except GetoptError, e:
+    except GetoptError as e:
         Logger(LOG_LEVELS.ERROR).error("changelog-git: Unknown option '%s'" % e.opt)
         sys.exit(EXIT_CODES.UNKNOWN_ARGUMENT)
 
@@ -177,8 +177,8 @@ def set_repo(project_path, git_logger):
     try:
         repo = Repo(project_path)
         git_logger.debug("connecting to git repo")
-    except InvalidGitRepositoryError, e:
-        git_logger.error("changelog-git: Can't find git repo for '%s'" % e.message)
+    except InvalidGitRepositoryError as e:
+        git_logger.error("changelog-git: Can't find git repo for '%s'" % e)
         sys.exit(EXIT_CODES.GIT_NOT_FOUND)
 
     # check git has commits
@@ -386,7 +386,7 @@ def generate_description(from_rev, to_rev, repo, commit_filter=None, pretty_merg
         commits = repo.commit(to_rev)
     else:
         commits = repo.iter_commits("%s...%s" % (from_rev, to_rev))
-    included_commits = ifilterfalse(commit_filter.match, commits)
+    included_commits = filterfalse(commit_filter.match, commits)
     mes = []
     for commit in included_commits:
         if pretty_merges and len(commit.parents) > 1:
